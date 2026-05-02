@@ -1,0 +1,12 @@
+# OS-spezifische Dateien
+.DS_Store
+Thumbs.db
+
+# Editor-Backups
+*~
+*.swp
+*.swo
+
+# Temporäre Dateien
+*.tmp
+*.bak

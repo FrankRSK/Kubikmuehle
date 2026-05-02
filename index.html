@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Vier Gewinnt - Kubikmühle (0.14)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            overflow: hidden;
+            touch-action: none;
+        }
+        
+        #gameContainer {
+            display: flex;
+            height: 100vh;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+        
+        #canvasContainer {
+            position: relative;
+            width: min(90vw, 800px);
+            height: min(90vw, 800px);
+        }
+        
+        #canvas {
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+            cursor: grab;
+            touch-action: none;
+        }
+        
+        #canvas:active {
+            cursor: grabbing;
+        }
+        
+        #controls {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            min-width: 250px;
+        }
+        
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 28px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        #status {
+            font-size: 20px;
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .button {
+            background: linear-gradient(145deg, #4CAF50, #45a049);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 0;
+            cursor: pointer;
+            border-radius: 8px;
+            width: 100%;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+        }
+        
+        .button:active {
+            transform: translateY(0);
+        }
+        
+        #difficulty {
+            margin: 20px 0;
+        }
+        
+        select {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            cursor: pointer;
+        }
+        
+        .sound-toggle {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .sound-toggle input {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .winner-white {
+            background: linear-gradient(145deg, #fff, #e0e0e0) !important;
+            color: #333 !important;
+        }
+        
+        .winner-black {
+            background: linear-gradient(145deg, #333, #000) !important;
+            color: #fff !important;
+        }
+        
+        @media (max-width: 768px) {
+            #gameContainer {
+                flex-direction: column;
+                gap: 20px;
+                padding: 10px;
+            }
+            
+            #canvasContainer {
+                width: 100%;
+                height: 60vh;
+                max-height: 500px;
+            }
+            
+            #controls {
+                width: 90%;
+                max-width: 400px;
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="canvasContainer">
+            <canvas id="canvas" width="800" height="800"></canvas>
+        </div>
+        <div id="controls">
+            <h1>3D Vier Gewinnt</h1>
+            <div id="status">Weiss ist am Zug</div>
+            
+            <button class="button" onclick="newGame()">Neues Spiel</button>
+            
+            <div id="difficulty">
+                <label for="aiLevel">KI-Schwierigkeit:</label>
+                <select id="aiLevel" onchange="updateAILevel()">
+                    <option value="1">Einfach</option>
+                    <option value="2">Mittel</option>
+                    <option value="3" selected>Schwer (Strategisch)</option>
+                </select>
+            </div>
+            
+            <div class="sound-toggle">
+                <input type="checkbox" id="soundEnabled" checked>
+                <label for="soundEnabled">Sound aktiviert</label>
+            </div>
+            
+            <div id="instructions">
+                <strong>Spielregeln:</strong><br>
+                • Platziere 4 Kugeln in einer Reihe<br>
+                • Horizontal, vertikal oder diagonal<br>
+                • Klicke auf eine Stange zum Platzieren<br>
+                • Du spielst als Weiss gegen die KI<br>
+                • Drehe das Spielfeld mit gedrückter Maustaste<br>
+                • Zoom mit dem Mausrad<br>
+                • Touch: Wischen zum Drehen, Pinch zum Zoomen
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Audio Context für Sounds
+        let audioContext;
+        let soundEnabled = true;
+        
+        // Spielzustand
+        let board = [];
+        let sphereObjects = [];
+        let blinkingSpheres = [];
+        let currentPlayer = 'white';
+        let gameOver = false;
+        let aiLevel = 3;
+        let isAIThinking = false;
+        
+        // Strategische KI-Variablen
+        let allPossibleLines = [];
+        let activeLines = new Set();
+        
+        // Three.js Variablen
+        let scene, camera, renderer;
+        let poles = [];
+        let spheres = [];
+        let raycaster, mouse;
+        let hoveredPole = null;
+        let boardGroup;
+        
+        // Maussteuerung
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let boardRotation = { x: -0.3, y: 0.4 };
+        let cameraDistance = 18;
+        let touches = [];
+        let pinchDistance = 0;
+        
+        // Positionsbezeichnungen
+        const COLUMNS = ['A', 'B', 'C', 'D'];
+        const ROWS = [1, 2, 3, 4];
+        const HEIGHTS = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+        
+        // Initialisiere alle möglichen Viererlinien
+        function initializeAllLines() {
+            allPossibleLines = [];
+            
+            // Horizontale Linien (in jeder Ebene)
+            for (let y = 0; y < 4; y++) {
+                for (let z = 0; z < 4; z++) {
+                    allPossibleLines.push([
+                        {x: 0, y: y, z: z},
+                        {x: 1, y: y, z: z},
+                        {x: 2, y: y, z: z},
+                        {x: 3, y: y, z: z}
+                    ]);
+                }
+            }
+            
+            // Vertikale Linien (auf jeder Stange)
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    allPossibleLines.push([
+                        {x: x, y: 0, z: z},
+                        {x: x, y: 1, z: z},
+                        {x: x, y: 2, z: z},
+                        {x: x, y: 3, z: z}
+                    ]);
+                }
+            }
+            
+            // Tiefenlinien (durch das Brett)
+            for (let x = 0; x < 4; x++) {
+                for (let y = 0; y < 4; y++) {
+                    allPossibleLines.push([
+                        {x: x, y: y, z: 0},
+                        {x: x, y: y, z: 1},
+                        {x: x, y: y, z: 2},
+                        {x: x, y: y, z: 3}
+                    ]);
+                }
+            }
+            
+            // Diagonalen in XY-Ebene
+            for (let z = 0; z < 4; z++) {
+                allPossibleLines.push([
+                    {x: 0, y: 0, z: z},
+                    {x: 1, y: 1, z: z},
+                    {x: 2, y: 2, z: z},
+                    {x: 3, y: 3, z: z}
+                ]);
+                allPossibleLines.push([
+                    {x: 0, y: 3, z: z},
+                    {x: 1, y: 2, z: z},
+                    {x: 2, y: 1, z: z},
+                    {x: 3, y: 0, z: z}
+                ]);
+            }
+            
+            // Diagonalen in XZ-Ebene
+            for (let y = 0; y < 4; y++) {
+                allPossibleLines.push([
+                    {x: 0, y: y, z: 0},
+                    {x: 1, y: y, z: 1},
+                    {x: 2, y: y, z: 2},
+                    {x: 3, y: y, z: 3}
+                ]);
+                allPossibleLines.push([
+                    {x: 0, y: y, z: 3},
+                    {x: 1, y: y, z: 2},
+                    {x: 2, y: y, z: 1},
+                    {x: 3, y: y, z: 0}
+                ]);
+            }
+            
+            // Diagonalen in YZ-Ebene
+            for (let x = 0; x < 4; x++) {
+                allPossibleLines.push([
+                    {x: x, y: 0, z: 0},
+                    {x: x, y: 1, z: 1},
+                    {x: x, y: 2, z: 2},
+                    {x: x, y: 3, z: 3}
+                ]);
+                allPossibleLines.push([
+                    {x: x, y: 0, z: 3},
+                    {x: x, y: 1, z: 2},
+                    {x: x, y: 2, z: 1},
+                    {x: x, y: 3, z: 0}
+                ]);
+            }
+            
+            // Raumdiagonalen
+            allPossibleLines.push([
+                {x: 0, y: 0, z: 0},
+                {x: 1, y: 1, z: 1},
+                {x: 2, y: 2, z: 2},
+                {x: 3, y: 3, z: 3}
+            ]);
+            allPossibleLines.push([
+                {x: 0, y: 0, z: 3},
+                {x: 1, y: 1, z: 2},
+                {x: 2, y: 2, z: 1},
+                {x: 3, y: 3, z: 0}
+            ]);
+            allPossibleLines.push([
+                {x: 0, y: 3, z: 0},
+                {x: 1, y: 2, z: 1},
+                {x: 2, y: 1, z: 2},
+                {x: 3, y: 0, z: 3}
+            ]);
+            allPossibleLines.push([
+                {x: 0, y: 3, z: 3},
+                {x: 1, y: 2, z: 2},
+                {x: 2, y: 1, z: 1},
+                {x: 3, y: 0, z: 0}
+            ]);
+            
+            // Initialisiere aktive Linien (alle Linien sind zu Beginn aktiv)
+            activeLines = new Set();
+            for (let i = 0; i < allPossibleLines.length; i++) {
+                activeLines.add(i);
+            }
+        }
+        
+        // HILFSFUNKTION (Gewinnline hervorheben)
+function highlightLine(startX, startY, startZ, dx, dy, dz) {
+    for (let i = 0; i < 4; i++) {
+        const x = startX + i * dx;
+        const y = startY + i * dy;
+        const z = startZ + i * dz;
+        const sphere = sphereObjects[x][z][y]; 
+        if (sphere) {
+            // Füge die Kugel und ihre Original-Leuchtfarbe der Liste hinzu
+            blinkingSpheres.push({
+                sphere: sphere,
+                originalEmissive: sphere.material.emissive.getHex(),
+                originalIntensity: sphere.material.emissiveIntensity
+            });
+        }
+    }
+}
+        
+        // Analysiere eine Linie (korrigiert)
+        function analyzeLine(lineIndex) {
+            const line = allPossibleLines[lineIndex];
+            let whiteCount = 0;
+            let blackCount = 0;
+            let emptyCount = 0;
+            let emptyPositions = [];
+            
+            for (const pos of line) {
+                const cell = board[pos.x][pos.z][pos.y];
+                if (cell === 'white') {
+                    whiteCount++;
+                } else if (cell === 'black') {
+                    blackCount++;
+                } else {
+                    emptyCount++;
+                    // Prüfe ob Position spielbar ist (Schwerkraft korrekt berücksichtigen)
+                    const currentHeight = getHeight(pos.x, pos.z);
+                    if (pos.y === currentHeight) { // Nur die nächste verfügbare Position ist spielbar
+                        emptyPositions.push(pos);
+                    }
+                }
+            }
+            
+            // Wenn beide Farben in der Linie sind, ist sie permanent blockiert
+            if (whiteCount > 0 && blackCount > 0) {
+                return { type: 'blocked', whiteCount, blackCount, emptyCount, emptyPositions };
+            }
+            
+            return { type: 'active', whiteCount, blackCount, emptyCount, emptyPositions };
+        }
+        
+        // Erweiterte Positionsbewertung
+        function evaluatePosition(x, y, z) {
+            let score = 0;
+            
+            // Zentrale Kontrolle (B2, B3, C2, C3 sind wertvoll)
+            if ((x === 1 || x === 2) && (z === 1 || z === 2)) {
+                score += 15;
+            }
+            
+            // Höhen-Strategie: Untere Ebenen bevorzugen
+            score += (3 - y) * 3;
+            
+            // Kreuzungspunkte bewerten (Positionen die viele Linien kreuzen)
+            let lineCount = 0;
+            for (const lineIndex of activeLines) {
+                const line = allPossibleLines[lineIndex];
+                if (line.some(pos => pos.x === x && pos.y === y && pos.z === z)) {
+                    lineCount++;
+                }
+            }
+            score += lineCount * 2;
+            
+            return score;
+        }
+        
+        // Finde sofortigen Gewinnzug (korrigiert)
+        function findWinningMove(player) {
+            for (const lineIndex of activeLines) {
+                const analysis = analyzeLine(lineIndex);
+                if (analysis.type === 'blocked') {
+                    activeLines.delete(lineIndex); // Entferne blockierte Linien
+                    continue;
+                }
+                
+                const playerCount = player === 'white' ? analysis.whiteCount : analysis.blackCount;
+                const opponentCount = player === 'white' ? analysis.blackCount : analysis.whiteCount;
+                
+                // Nur Linien prüfen die dem Spieler gehören (keine Gegner-Steine)
+                if (opponentCount > 0) continue;
+                
+                // Wenn 3 eigene Steine und 1 spielbare leere Position
+                if (playerCount === 3 && analysis.emptyPositions.length === 1) {
+                    const pos = analysis.emptyPositions[0];
+                    console.log(`Gewinnzug gefunden für ${player}: ${pos.x},${pos.z} (Linie ${lineIndex})`);
+                    return { x: pos.x, z: pos.z };
+                }
+            }
+            return null;
+        }
+        
+        // Finde Zwickmühlen-Züge
+        function findForkMoves(player) {
+            const forkMoves = [];
+            
+            // Prüfe jeden möglichen Zug
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    const y = getHeight(x, z);
+                    if (y >= 4) continue;
+                    
+                    // Simuliere den Zug
+                    board[x][z][y] = player;
+                    
+                    // Zähle wie viele sofortige Gewinndrohungen entstehen
+                    let immediateWins = 0;
+                    let potentialThreats = 0;
+                    
+                    for (const lineIndex of activeLines) {
+                        const analysis = analyzeLine(lineIndex);
+                        if (analysis.type === 'blocked') continue;
+                        
+                        const playerCount = player === 'white' ? analysis.whiteCount : analysis.blackCount;
+                        const opponentCount = player === 'white' ? analysis.blackCount : analysis.whiteCount;
+                        
+                        // Nur Linien betrachten die dem Spieler gehören
+                        if (opponentCount > 0) continue;
+                        
+                        // Prüfe auf sofortige Gewinnmöglichkeiten (3 in einer Reihe + 1 freie spielbare Position)
+                        if (playerCount === 3 && analysis.emptyPositions.length === 1) {
+                            immediateWins++;
+                        }
+                        // Prüfe auf starke Bedrohungen (2 in einer Reihe + 2 freie Positionen)
+                        else if (playerCount === 2 && analysis.emptyPositions.length >= 2) {
+                            potentialThreats++;
+                        }
+                    }
+                    
+                    // Rückgängig machen
+                    board[x][z][y] = null;
+                    
+                    // Debug-Ausgabe für Zwickmühlen-Erkennung
+                    if (immediateWins >= 2) {
+                        console.log(`${player} Zwickmühle erkannt! Position ${x},${z}: ${immediateWins} sofortige Gewinne`);
+                    }
+                    
+                    // Bewerte basierend auf sofortigen Gewinnen und Bedrohungen
+                    const totalValue = immediateWins * 100 + potentialThreats * 10;
+                    
+                    if (immediateWins >= 2 || (immediateWins >= 1 && potentialThreats >= 2) || totalValue >= 50) {
+                        forkMoves.push({ 
+                            x, z, 
+                            immediateWins: immediateWins,
+                            potentialThreats: potentialThreats,
+                            totalValue: totalValue,
+                            position: evaluatePosition(x, y, z)
+                        });
+                    }
+                }
+            }
+            
+            return forkMoves.sort((a, b) => {
+                // Sortiere primär nach sofortigen Gewinnen, dann nach Gesamtwert
+                if (a.immediateWins !== b.immediateWins) return b.immediateWins - a.immediateWins;
+                if (a.totalValue !== b.totalValue) return b.totalValue - a.totalValue;
+                return b.position - a.position;
+            });
+        }
+        
+        // Prüfe auf Mehrfach-Bedrohungen
+        function findMultipleThreatMoves(player) {
+            const threatMoves = [];
+            
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    const y = getHeight(x, z);
+                    if (y >= 4) continue;
+                    
+                    // Simuliere den Zug
+                    board[x][z][y] = player;
+                    
+                    // Zähle Dreierreihen die entstehen
+                    let immediateThreats = 0;
+                    for (const lineIndex of activeLines) {
+                        const analysis = analyzeLine(lineIndex);
+                        if (analysis.type === 'blocked') continue;
+                        
+                        const playerCount = player === 'white' ? analysis.whiteCount : analysis.blackCount;
+                        if (playerCount === 3 && analysis.emptyPositions.length === 1) {
+                            immediateThreats++;
+                        }
+                    }
+                    
+                    // Rückgängig machen
+                    board[x][z][y] = null;
+                    
+                    if (immediateThreats >= 2) {
+                        threatMoves.push({ 
+                            x, z, 
+                            threats: immediateThreats,
+                            position: evaluatePosition(x, y, z)
+                        });
+                    }
+                }
+            }
+            
+            return threatMoves.sort((a, b) => {
+                if (a.threats !== b.threats) return b.threats - a.threats;
+                return b.position - a.position;
+            });
+        }
+        
+        // 2-Zug-Vorausschau
+        function evaluateTwoMoveAhead(x, z, player) {
+            const y = getHeight(x, z);
+            if (y >= 4) return -1000;
+            
+            // Simuliere eigenen Zug
+            board[x][z][y] = player;
+            
+            let bestOpponentResponse = -Infinity;
+            const opponent = player === 'black' ? 'white' : 'black';
+            
+            // Prüfe alle möglichen Gegner-Antworten
+            for (let ox = 0; ox < 4; ox++) {
+                for (let oz = 0; oz < 4; oz++) {
+                    const oy = getHeight(ox, oz);
+                    if (oy >= 4) continue;
+                    
+                    // Simuliere Gegner-Zug
+                    board[ox][oz][oy] = opponent;
+                    
+                    // Bewerte resultierende Position
+                    let positionValue = 0;
+                    
+                    // Prüfe auf Gegner-Gewinn
+                    if (checkWin(opponent)) {
+                        positionValue = 1000; // Schlecht für uns
+                    } else {
+                        // Bewerte Bedrohungen
+                        const ourThreats = findWinningMove(player) ? 100 : 0;
+                        const theirThreats = findWinningMove(opponent) ? -200 : 0;
+                        positionValue = ourThreats + theirThreats;
+                    }
+                    
+                    // Rückgängig machen
+                    board[ox][oz][oy] = null;
+                    
+                    bestOpponentResponse = Math.max(bestOpponentResponse, positionValue);
+                }
+            }
+            
+            // Rückgängig machen
+            board[x][z][y] = null;
+            
+            return -bestOpponentResponse; // Negieren, da wir das Minimum der Gegner-Vorteile wollen
+        }
+        
+        // Erweiterte KI-Strategie (mit verbesserter Debug-Ausgabe)
+        function getStrategicMove() {
+            console.log("=== KI Strategische Analyse ===");
+            
+            // 1. Prüfe auf sofortigen Gewinn
+            const winMove = findWinningMove('black');
+            if (winMove) {
+                console.log('KI: Gewinnzug gefunden! Position:', winMove);
+                return winMove;
+            }
+            
+            // 2. Prüfe auf Blockierung des Gegners (KRITISCH!)
+            const blockMove = findWinningMove('white');
+            if (blockMove) {
+                console.log('KI: BLOCKIERE Gegner-Gewinn! Position:', blockMove);
+                return blockMove;
+            }
+            
+            // 3. Verhindere Gegner-Zwickmühlen (HÖCHSTE PRIORITÄT)
+            const enemyForkMoves = findForkMoves('white');
+            if (enemyForkMoves.length > 0) {
+                console.log('KI: VERHINDERE Gegner-Zwickmühle!', enemyForkMoves[0]);
+                // Finde den besten Blockade-Zug
+                return findBestBlockadeMove(enemyForkMoves[0]);
+            }
+            
+            // 4. Prüfe auf eigene Zwickmühlen-Aufbau
+            const forkMoves = findForkMoves('black');
+            if (forkMoves.length > 0) {
+                console.log('KI: Baue eigene Zwickmühle auf!', forkMoves[0]);
+                return forkMoves[0];
+            }
+            
+            // 5. Prüfe auf Mehrfach-Bedrohungen
+            const multiThreatMoves = findMultipleThreatMoves('black');
+            if (multiThreatMoves.length > 0) {
+                console.log('KI: Schaffe Mehrfach-Bedrohung!', multiThreatMoves[0]);
+                return multiThreatMoves[0];
+            }
+            
+            // 6. Strategische Bewertung aller verbleibenden Züge
+            console.log('KI: Verwende strategische Bewertung...');
+            return getBestStrategicMove();
+        }
+        
+        // Finde besten Blockade-Zug gegen Zwickmühle
+        function findBestBlockadeMove(enemyFork) {
+            // Teste alle verfügbaren Züge um die Zwickmühle zu brechen
+            let bestBlock = null;
+            let bestScore = -Infinity;
+            
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    const y = getHeight(x, z);
+                    if (y >= 4) continue;
+                    
+                    // Simuliere Blockade-Zug
+                    board[x][z][y] = 'black';
+                    
+                    // Prüfe ob Gegner-Zwickmühle noch möglich ist
+                    const remainingForks = findForkMoves('white');
+                    let score = 100 - remainingForks.length * 50; // Weniger Forks = besser
+                    
+                    // Zusätzliche Bewertung der Position
+                    score += evaluatePosition(x, y, z);
+                    
+                    board[x][z][y] = null;
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestBlock = {x, z};
+                    }
+                }
+            }
+            
+            return bestBlock || getRandomMove();
+        }
+        
+        // Strategische Zugbewertung
+        function getBestStrategicMove() {
+            let bestMoves = [];
+            let bestScore = -Infinity;
+            
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    const y = getHeight(x, z);
+                    if (y >= 4) continue;
+                    
+                    let score = evaluatePosition(x, y, z);
+                    
+                    // Simuliere Zug
+                    board[x][z][y] = 'black';
+                    
+                    // Bewerte entstehende Möglichkeiten
+                    for (const lineIndex of activeLines) {
+                        const analysis = analyzeLine(lineIndex);
+                        if (analysis.type === 'blocked') continue;
+                        
+                        if (analysis.blackCount === 2 && analysis.emptyPositions.length >= 2) {
+                            score += 30; // Zwei in einer Reihe
+                        } else if (analysis.blackCount === 1 && analysis.emptyPositions.length >= 3) {
+                            score += 5; // Grundstein
+                        }
+                    }
+                    
+                    // Prüfe ob wir dem Gegner helfen (PENALTY)
+                    board[x][z][y] = 'white';
+                    const opponentGain = findWinningMove('white') ? -100 : 0;
+                    board[x][z][y] = null;
+                    
+                    score += opponentGain;
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMoves = [{x, z}];
+                    } else if (Math.abs(score - bestScore) < 2) {
+                        bestMoves.push({x, z});
+                    }
+                }
+            }
+            
+            if (bestMoves.length > 0) {
+                const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+                console.log('KI: Strategischer Zug gewählt:', chosen, 'Score:', bestScore);
+                return chosen;
+            }
+            
+            return getRandomMove();
+        }
+        
+        // Initialisiere Audio
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        // Sound-Effekte
+        function playSound(frequency, duration, type = 'sine') {
+            if (!soundEnabled || !audioContext) return;
+            
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+        
+        function playPlaceSound() {
+            playSound(523.25, 0.1);
+            setTimeout(() => playSound(659.25, 0.1), 50);
+        }
+        
+        function playWinSound() {
+            const notes = [523.25, 659.25, 783.99, 1046.50];
+            notes.forEach((note, i) => {
+                setTimeout(() => playSound(note, 0.3), i * 100);
+            });
+        }
+        
+        function playErrorSound() {
+            playSound(220, 0.2, 'sawtooth');
+        }
+        
+        // Initialisiere das Spielbrett
+        // Initialisiere das Spielbrett
+function initBoard() {
+    board = [];
+    sphereObjects = []; // NEU: Das Array für ein neues Spiel leeren
+
+    for (let x = 0; x < 4; x++) {
+        board[x] = [];
+        sphereObjects[x] = []; // NEU: Die zweite Dimension des Arrays erstellen
+
+        for (let z = 0; z < 4; z++) {
+            board[x][z] = [];
+            sphereObjects[x][z] = []; // NEU: Die dritte Dimension des Arrays erstellen
+
+            for (let y = 0; y < 4; y++) {
+                board[x][z][y] = null;
+                sphereObjects[x][z][y] = null; // NEU: Die Positionen mit null füllen
+            }
+        }
+    }
+    
+    // Initialisiere Linien
+    initializeAllLines();
+}
+        
+        // Three.js Setup
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+            
+            const canvas = document.getElementById('canvas');
+            const container = document.getElementById('canvasContainer');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            
+            camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+            camera.position.set(0, 12, 12);
+            camera.lookAt(0, 0, 0);
+            updateCameraDistance();
+            
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: canvas,
+                antialias: true 
+            });
+            renderer.setSize(width, height);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            
+            // Gruppe für das gesamte Spielbrett
+            boardGroup = new THREE.Group();
+            scene.add(boardGroup);
+            
+            // Beleuchtung
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 10, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.near = 0.1;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -10;
+            directionalLight.shadow.camera.right = 10;
+            directionalLight.shadow.camera.top = 10;
+            directionalLight.shadow.camera.bottom = -10;
+            scene.add(directionalLight);
+            
+            const pointLight = new THREE.PointLight(0xffffff, 0.5);
+            pointLight.position.set(-5, 8, -5);
+            scene.add(pointLight);
+            
+            // Spielbrett (Basis)
+            const boardGeometry = new THREE.BoxGeometry(8, 0.5, 8);
+            const boardMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x8B4513,
+                specular: 0x222222,
+                shininess: 30
+            });
+            const boardMesh = new THREE.Mesh(boardGeometry, boardMaterial);
+            boardMesh.position.y = -0.25;
+            boardMesh.receiveShadow = true;
+            boardGroup.add(boardMesh);
+            
+            // Stangen erstellen
+            const poleGeometry = new THREE.CylinderGeometry(0.08, 0.08, 5.5);
+            const poleMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x666666,
+                specular: 0xffffff,
+                shininess: 100
+            });
+            
+            poles = [];
+            for (let x = 0; x < 4; x++) {
+                poles[x] = [];
+                for (let z = 0; z < 4; z++) {
+                    const pole = new THREE.Mesh(poleGeometry, poleMaterial.clone());
+                    pole.position.set((x - 1.5) * 2, 2.75, (z - 1.5) * 2);
+                    pole.castShadow = true;
+                    pole.userData = { x: x, z: z };
+                    poles[x][z] = pole;
+                    boardGroup.add(pole);
+                }
+            }
+            
+            // Initiale Rotation
+            boardGroup.rotation.x = boardRotation.x;
+            boardGroup.rotation.y = boardRotation.y;
+            
+            // Raycaster für Mausinteraktion
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            
+            // Event Listener
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            renderer.domElement.addEventListener('mouseleave', onMouseLeave);
+            renderer.domElement.addEventListener('wheel', onWheel);
+            
+            // Touch Events
+            renderer.domElement.addEventListener('touchstart', onTouchStart);
+            renderer.domElement.addEventListener('touchmove', onTouchMove);
+            renderer.domElement.addEventListener('touchend', onTouchEnd);
+            
+            // Window Resize
+            window.addEventListener('resize', onWindowResize);
+        }
+        
+        // Fenster-Größenänderung
+        function onWindowResize() {
+            const container = document.getElementById('canvasContainer');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+        
+        // Kamera-Distanz aktualisieren
+        function updateCameraDistance() {
+            const distance = cameraDistance;
+            camera.position.set(0, distance * 0.67, distance * 0.67);
+            camera.lookAt(0, 0, 0);
+        }
+        
+        // Mausrad für Zoom
+        function onWheel(event) {
+            event.preventDefault();
+            cameraDistance += event.deltaY * 0.01;
+            cameraDistance = Math.max(10, Math.min(30, cameraDistance));
+            updateCameraDistance();
+        }
+        
+        // Touch Events
+        function onTouchStart(event) {
+            event.preventDefault();
+            touches = Array.from(event.touches);
+            
+            if (touches.length === 1) {
+                isDragging = true;
+                previousMousePosition = {
+                    x: touches[0].clientX,
+                    y: touches[0].clientY
+                };
+                
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((touches[0].clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((touches[0].clientY - rect.top) / rect.height) * 2 + 1;
+            } else if (touches.length === 2) {
+                const dx = touches[0].clientX - touches[1].clientX;
+                const dy = touches[0].clientY - touches[1].clientY;
+                pinchDistance = Math.sqrt(dx * dx + dy * dy);
+            }
+        }
+        
+        function onTouchMove(event) {
+            event.preventDefault();
+            touches = Array.from(event.touches);
+            
+            if (touches.length === 1 && isDragging) {
+                const deltaX = touches[0].clientX - previousMousePosition.x;
+                const deltaY = touches[0].clientY - previousMousePosition.y;
+                
+                boardRotation.y += deltaX * 0.01;
+                boardRotation.x += deltaY * 0.01;
+                boardRotation.x = Math.max(-Math.PI/3, Math.min(Math.PI/3, boardRotation.x));
+                
+                boardGroup.rotation.x = boardRotation.x;
+                boardGroup.rotation.y = boardRotation.y;
+                
+                previousMousePosition = {
+                    x: touches[0].clientX,
+                    y: touches[0].clientY
+                };
+            } else if (touches.length === 2) {
+                const dx = touches[0].clientX - touches[1].clientX;
+                const dy = touches[0].clientY - touches[1].clientY;
+                const newPinchDistance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (pinchDistance > 0) {
+                    const scale = newPinchDistance / pinchDistance;
+                    cameraDistance /= scale;
+                    cameraDistance = Math.max(10, Math.min(30, cameraDistance));
+                    updateCameraDistance();
+                }
+                
+                pinchDistance = newPinchDistance;
+            }
+        }
+        
+        function onTouchEnd(event) {
+            event.preventDefault();
+            
+            if (touches.length === 1 && event.touches.length === 0) {
+                const touchEndTime = Date.now();
+                const touchDuration = touchEndTime - (window.touchStartTime || 0);
+                
+                if (touchDuration < 300 && !event.defaultPrevented) {
+                    handleClick();
+                }
+            }
+            
+            isDragging = false;
+            touches = Array.from(event.touches);
+            
+            if (touches.length < 2) {
+                pinchDistance = 0;
+            }
+            
+            window.touchStartTime = Date.now();
+        }
+        
+        // Maussteuerung
+        function onMouseDown(event) {
+            isDragging = true;
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+        }
+        
+        function onMouseUp(event) {
+            isDragging = false;
+            
+            if (Math.abs(event.clientX - previousMousePosition.x) < 5 && 
+                Math.abs(event.clientY - previousMousePosition.y) < 5) {
+                handleClick();
+            }
+        }
+        
+        function onMouseLeave(event) {
+            isDragging = false;
+            if (hoveredPole) {
+                hoveredPole.material.color.setHex(0x666666);
+                hoveredPole.material.emissive.setHex(0x000000);
+                hoveredPole = null;
+            }
+        }
+        
+        function onMouseMove(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            if (isDragging) {
+                const deltaX = event.clientX - previousMousePosition.x;
+                const deltaY = event.clientY - previousMousePosition.y;
+                
+                boardRotation.y += deltaX * 0.01;
+                boardRotation.x += deltaY * 0.01;
+                
+                boardRotation.x = Math.max(-Math.PI/3, Math.min(Math.PI/3, boardRotation.x));
+                
+                boardGroup.rotation.x = boardRotation.x;
+                boardGroup.rotation.y = boardRotation.y;
+                
+                previousMousePosition = {
+                    x: event.clientX,
+                    y: event.clientY
+                };
+            } else {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(poles.flat());
+                
+                if (hoveredPole) {
+                    hoveredPole.material.color.setHex(0x666666);
+                    hoveredPole.material.emissive.setHex(0x000000);
+                    hoveredPole = null;
+                }
+                
+                if (intersects.length > 0 && !gameOver && !isAIThinking && currentPlayer === 'white') {
+                    const pole = intersects[0].object;
+                    const {x, z} = pole.userData;
+                    
+                    if (getHeight(x, z) < 4) {
+                        hoveredPole = pole;
+                        pole.material.color.setHex(0x00ff00);
+                        pole.material.emissive.setHex(0x00ff00);
+                        pole.material.emissiveIntensity = 0.3;
+                        renderer.domElement.style.cursor = 'pointer';
+                    } else {
+                        renderer.domElement.style.cursor = 'not-allowed';
+                    }
+                } else {
+                    renderer.domElement.style.cursor = isDragging ? 'grabbing' : 'grab';
+                }
+            }
+        }
+        
+        function handleClick() {
+            if (gameOver || isAIThinking || currentPlayer !== 'white') return;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(poles.flat());
+            
+            if (intersects.length > 0) {
+                const pole = intersects[0].object;
+                const {x, z} = pole.userData;
+                
+                if (makeMove(x, z)) {
+                    if (!gameOver) {
+                        setTimeout(() => aiMove(), 500);
+                    }
+                }
+            }
+        }
+        
+        function getHeight(x, z) {
+            let height = 0;
+            for (let y = 0; y < 4; y++) {
+                if (board[x][z][y] !== null) {
+                    height++;
+                } else {
+                    break;
+                }
+            }
+            return height;
+        }
+        
+        function makeMove(x, z) {
+            const y = getHeight(x, z);
+            if (y >= 4) {
+                playErrorSound();
+                return false;
+            }
+            
+            board[x][z][y] = currentPlayer;
+            addSphere(x, y, z, currentPlayer);
+            playPlaceSound();
+            
+            if (checkWin(currentPlayer)) {
+                gameOver = true;
+                const status = document.getElementById('status');
+                status.textContent = `${currentPlayer === 'white' ? 'Weiss' : 'Schwarz'} hat gewonnen!`;
+                status.className = currentPlayer === 'white' ? 'winner-white' : 'winner-black';
+                playWinSound();
+            } else if (isBoardFull()) {
+                gameOver = true;
+                document.getElementById('status').textContent = 'Unentschieden!';
+            } else {
+                currentPlayer = currentPlayer === 'white' ? 'black' : 'white';
+                updateStatus();
+            }
+            
+            return true;
+        }
+        
+        function addSphere(x, y, z, color) {
+    const geometry = new THREE.SphereGeometry(0.55, 32, 16);
+    const material = new THREE.MeshPhongMaterial({ 
+        color: color === 'white' ? 0xffffff : 0x111111,
+        specular: 0xffffff,
+        shininess: 100,
+        emissive: color === 'white' ? 0xffffff : 0x111111,
+        emissiveIntensity: 0.1
+    });
+    
+    const sphere = new THREE.Mesh(geometry, material);
+    sphere.position.set((x - 1.5) * 2, y * 1.2 + 0.6, (z - 1.5) * 2);
+    sphere.castShadow = true;
+    sphere.receiveShadow = true;
+    
+    sphere.scale.set(0, 0, 0);
+    boardGroup.add(sphere);
+    spheres.push(sphere);
+    
+    // HINZUGEFÜGT: Speichert eine Referenz auf das 3D-Objekt für späteren Zugriff
+    sphereObjects[x][z][y] = sphere;
+    
+    const animate = () => {
+        if (sphere.scale.x < 1) {
+            sphere.scale.x += 0.1;
+            sphere.scale.y += 0.1;
+            sphere.scale.z += 0.1;
+            requestAnimationFrame(animate);
+        }
+    };
+    animate();
+}
+        
+        /**
+ * ERWEITERTE FUNKTION: Prüft auf Gewinn.
+ * Wenn eine Gewinnlinie gefunden wird, ruft sie die Hilfsfunktion 'highlightLine'
+ * auf, um die Linie visuell hervorzuheben, und gibt dann 'true' zurück.
+ */
+function checkWin(player) {
+    
+    // Horizontale Linien (in der X-Achse)
+    for (let y = 0; y < 4; y++) {
+        for (let z = 0; z < 4; z++) {
+            if (checkLine(player, 0, y, z, 1, 0, 0)) {
+                highlightLine(0, y, z, 1, 0, 0);
+                return true;
+            }
+        }
+    }
+    
+    // Vertikale Linien (in der Y-Achse)
+    for (let x = 0; x < 4; x++) {
+        for (let z = 0; z < 4; z++) {
+            if (checkLine(player, x, 0, z, 0, 1, 0)) {
+                highlightLine(x, 0, z, 0, 1, 0);
+                return true;
+            }
+        }
+    }
+    
+    // Tiefenlinien (in der Z-Achse)
+    for (let x = 0; x < 4; x++) {
+        for (let y = 0; y < 4; y++) {
+            if (checkLine(player, x, y, 0, 0, 0, 1)) {
+                highlightLine(x, y, 0, 0, 0, 1);
+                return true;
+            }
+        }
+    }
+    
+    // Diagonalen in der XY-Ebene
+    for (let z = 0; z < 4; z++) {
+        if (checkLine(player, 0, 0, z, 1, 1, 0)) {
+            highlightLine(0, 0, z, 1, 1, 0);
+            return true;
+        }
+        if (checkLine(player, 0, 3, z, 1, -1, 0)) {
+            highlightLine(0, 3, z, 1, -1, 0);
+            return true;
+        }
+    }
+    
+    // Diagonalen in der XZ-Ebene
+    for (let y = 0; y < 4; y++) {
+        if (checkLine(player, 0, y, 0, 1, 0, 1)) {
+            highlightLine(0, y, 0, 1, 0, 1);
+            return true;
+        }
+        if (checkLine(player, 0, y, 3, 1, 0, -1)) {
+            highlightLine(0, y, 3, 1, 0, -1);
+            return true;
+        }
+    }
+    
+    // Diagonalen in der YZ-Ebene
+    for (let x = 0; x < 4; x++) {
+        if (checkLine(player, x, 0, 0, 0, 1, 1)) {
+            highlightLine(x, 0, 0, 0, 1, 1);
+            return true;
+        }
+        if (checkLine(player, x, 3, 0, 0, -1, 1)) {
+            highlightLine(x, 3, 0, 0, -1, 1);
+            return true;
+        }
+    }
+    
+    // Raumdiagonalen (die 4 großen Diagonalen durch den Würfel)
+    if (checkLine(player, 0, 0, 0, 1, 1, 1)) {
+        highlightLine(0, 0, 0, 1, 1, 1);
+        return true;
+    }
+    if (checkLine(player, 0, 0, 3, 1, 1, -1)) {
+        highlightLine(0, 0, 3, 1, 1, -1);
+        return true;
+    }
+    if (checkLine(player, 0, 3, 0, 1, -1, 1)) {
+        highlightLine(0, 3, 0, 1, -1, 1);
+        return true;
+    }
+    if (checkLine(player, 0, 3, 3, 1, -1, -1)) {
+        highlightLine(0, 3, 3, 1, -1, -1);
+        return true;
+    }
+    
+    // Wenn keine der Prüfungen erfolgreich war
+    return false;
+}
+        
+        function checkLine(player, startX, startY, startZ, dx, dy, dz) {
+            for (let i = 0; i < 4; i++) {
+                const x = startX + i * dx;
+                const y = startY + i * dy;
+                const z = startZ + i * dz;
+                
+                if (x < 0 || x >= 4 || y < 0 || y >= 4 || z < 0 || z >= 4) {
+                    return false;
+                }
+                
+                if (board[x][z][y] !== player) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        
+        function isBoardFull() {
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    if (getHeight(x, z) < 4) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        
+        function aiMove() {
+            if (gameOver) return;
+            
+            isAIThinking = true;
+            updateStatus();
+            
+            setTimeout(() => {
+                let move;
+                
+                if (aiLevel === 1) {
+                    move = getRandomMove();
+                } else if (aiLevel === 2) {
+                    move = getMediumMove();
+                } else {
+                    move = getStrategicMove();
+                }
+                
+                if (move) {
+                    makeMove(move.x, move.z);
+                }
+                
+                isAIThinking = false;
+            }, 300);
+        }
+        
+        function getRandomMove() {
+            const availableMoves = [];
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    if (getHeight(x, z) < 4) {
+                        availableMoves.push({x, z});
+                    }
+                }
+            }
+            
+            if (availableMoves.length === 0) return null;
+            return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+        }
+        
+        function getMediumMove() {
+            const winMove = findWinningMove('black');
+            if (winMove) return winMove;
+            
+            const blockMove = findWinningMove('white');
+            if (blockMove) return blockMove;
+            
+            const goodMoves = [];
+            
+            for (let x = 0; x < 4; x++) {
+                for (let z = 0; z < 4; z++) {
+                    const y = getHeight(x, z);
+                    if (y < 4) {
+                        if ((x === 1 || x === 2) && (z === 1 || z === 2)) {
+                            goodMoves.push({x, z});
+                        }
+                    }
+                }
+            }
+            
+            if (goodMoves.length > 0) {
+                return goodMoves[Math.floor(Math.random() * goodMoves.length)];
+            }
+            
+            return getRandomMove();
+        }
+        
+        function updateStatus() {
+            const status = document.getElementById('status');
+            if (!gameOver) {
+                if (isAIThinking) {
+                    status.textContent = 'KI denkt nach...';
+                } else {
+                    status.textContent = `${currentPlayer === 'white' ? 'Weiss' : 'Schwarz'} ist am Zug`;
+                }
+            }
+        }
+        
+        function newGame() {
+            blinkingSpheres = []; // NEU: Blink-Effekt zurücksetzen
+            spheres.forEach(sphere => boardGroup.remove(sphere));
+            spheres = [];
+            
+            poles.flat().forEach(pole => {
+                pole.material.color.setHex(0x666666);
+                pole.material.emissive.setHex(0x000000);
+            });
+            hoveredPole = null;
+            
+            initBoard();
+            currentPlayer = 'white';
+            gameOver = false;
+            isAIThinking = false;
+            
+            const status = document.getElementById('status');
+            status.className = '';
+            updateStatus();
+            
+            playSound(440, 0.1);
+        }
+        
+        function updateAILevel() {
+            aiLevel = parseInt(document.getElementById('aiLevel').value);
+        }
+        
+        document.getElementById('soundEnabled').addEventListener('change', (e) => {
+            soundEnabled = e.target.checked;
+            if (soundEnabled && !audioContext) {
+                initAudio();
+            }
+        });
+        
+        function animate() {
+    requestAnimationFrame(animate);
+
+    // NEU: Blink-Logik
+    if (blinkingSpheres.length > 0) {
+        // Schaltet den Blink-Zustand ca. alle halbe Sekunde um
+        const isBlinkOn = Math.floor(Date.now() / 500) % 2 === 0;
+
+        blinkingSpheres.forEach(item => {
+            if (isBlinkOn) {
+                // Zustand "AN": Leuchtend gelb
+                item.sphere.material.emissive.setHex(0xffff00);
+                item.sphere.material.emissiveIntensity = 1.2;
+            } else {
+                // Zustand "AUS": Originalfarbe und -intensität
+                item.sphere.material.emissive.setHex(item.originalEmissive);
+                item.sphere.material.emissiveIntensity = item.originalIntensity;
+            }
+        });
+    }
+
+    // Bestehende Kugelrotation
+    spheres.forEach(sphere => {
+        sphere.rotation.y += 0.005;
+    });
+    
+    renderer.render(scene, camera);
+}
+        
+        window.onload = function() {
+            initAudio();
+            initBoard();
+            initThreeJS();
+            animate();
+            
+            document.addEventListener('click', function initAudioContext() {
+                if (audioContext && audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+                document.removeEventListener('click', initAudioContext);
+            }, { once: true });
+        };
+    </script>
+</body>
+</html>

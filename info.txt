@@ -1,0 +1,5 @@
+Bei dem Spiel "Kubikmühle" handelt es sich um eine browserbasierte 3D-Variante des Spieleklassikers "Vier gewinnt". Das Ziel ist es, auf einem 4x4x4-Spielfeld vier Kugeln der eigenen Farbe in eine horizontale, vertikale oder diagonale Reihe zu bringen.
+
+Du trittst mit den weißen Kugeln gegen eine künstliche Intelligenz (KI) an, deren Spielstärke in drei Stufen (Einfach, Mittel, Schwer) angepasst werden kann. Die Steuerung ist für Desktop und Mobilgeräte optimiert: Am PC klickt man auf eine der 16 Stangen, um eine Kugel zu platzieren. Das Spielfeld kann durch Ziehen mit der Maus gedreht und mit dem Mausrad gezoomt werden. Auf dem Handy oder Tablet zieht man eine Kugel auf das Feld und nutzt Touch-Gesten zum Drehen und Zoomen.
+
+Das Spiel bietet zusätzliche Funktionen wie einen Knopf zum Rückgängigmachen des letzten Zuges, Soundeffekte und eine mehrsprachige Benutzeroberfläche, die unter anderem Deutsch, Englisch, Spanisch und Chinesisch unterstützt.
